@@ -1,0 +1,12 @@
+{application, quickfix_erl,
+ [
+  {description, "Erlang FIX engine"},
+  {vsn, "0.01"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { quickfix_erl_app, []}},
+  {env, []}
+ ]}.

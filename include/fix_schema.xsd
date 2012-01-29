@@ -1,0 +1,14 @@
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+        <xsd:element name="fix"
+                     minOccurs="0" 
+                     maxOccurs="1">
+           <xsd:complexType>
+              <xsd:sequence>
+		<xs:attribute name="major" type="xs:integer"/>
+		<xs:attribute name="type" type="xs:string"/>
+		<xs:attribute name="servicepack" type="xs:integer"/>
+		<xs:attribute name="minor" type="xs:integer"/>
+             </xsd:sequence>
+          </xsd:complexType>
+        </xsd:element>
+  </xsd:schema>
