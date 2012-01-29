@@ -11,7 +11,7 @@
 -behaviour(gen_fsm).
 -include("../include/session_records.hrl").
 %% API
--export([start_link/3]).
+-export([start_link/1]).
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3,
@@ -42,21 +42,28 @@
 %%%===================================================================
 
 %%Starts the server and begins connecting
--spec start_link(#session_settings{},fun(), fun()) -> ok.
-start_link(SessionSettings,HandleAdminMsg, HandleMsg) ->
-    gen_fsm:start_link({local, ?SERVER}, ?MODULE,[SessionSettings,HandleAdminMsg,HandleMsg],[]).
+-spec start_link(#session_settings{}) -> ok.
+start_link(SessionSettings) ->
+    io:format("Starting~n"),
+    gen_fsm:start_link({local, ?SERVER}, ?MODULE,[SessionSettings],[]).
 
 %%%===================================================================
 %%% gen_fsm callbacks
 %%%===================================================================
 
 %%Initializes the state with session info and starts connecting
-init([#session_settings{data_dictionary = Dict, session_id = Id}= Session_Settings,HandleAdmin,HandleMsg]) ->
-    PrivDir = code:priv_dir(quickfix_erl),
-    io:format("~p~n",[PrivDir]),
-    session_utils:parse_dict(Dict,PrivDir++"spec.xsd"),
+init([#session_settings{data_dictionary = Dict, session_id = _Id}= Session_Settings]) ->
+    io:format("in init~n"),
+    PrivDir = case code:priv_dir(quickfix_erl) of
+		  {error,_} -> 
+		      {ok,F} = file:get_cwd(),
+		      F++"/../priv/";
+		  F -> F
+	      end,
+    {_Major,_Minor,_Header,_Messages,_Trailer,_Comp,_Fields} = session_utils:parse_dict(Dict,PrivDir++"/spec.xsd"),
+    io:format("Starting connection ~p.~p~n",[_Major,_Minor]),
     self() ! connect,
-    {ok, disconnected, #session_state{session = Session_Settings,admin_handler = HandleAdmin, msg_handler = HandleMsg}}.
+    {ok, disconnected, #session_state{session = Session_Settings}}.
 
 %%Initial connection
 disconnected(connect, #session_state{socket = Socket, session = Session} = State) when Socket == undefined ->

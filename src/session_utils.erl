@@ -10,7 +10,7 @@
 -include("../include/session_records.hrl").
 
 %% API
--export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2]).
+-export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2,to_list/1]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -21,53 +21,60 @@
 %%%===================================================================
 
 compose_session_id(#session_settings{begin_string = B, sender_comp_id = SC, sender_sub_id = SS, sender_location_id = SL, target_comp_id = TC, target_sub_id = TS, target_location_id = TL, session_qualifier = SQ} = _SessionSettings) ->
-    ID = B++":"++SC,
-    ID0 = append_defined(ID, [SS,SL]) ++ "->"++TC,
-    ID1 = append_defined(ID0, [TS,TL]),
+    
+    ID = to_list(B)++":"++to_list(SC),
+    ID0 = append_defined(ID, [to_list(SS),to_list(SL)]) ++ "->"++to_list(TC),
+    ID1 = append_defined(ID0, [to_list(TS),to_list(TL)]),
     case SQ of
 	"" -> ID1;
-	_ -> ID1++":"++SQ
+	_ -> ID1++":"++to_list(SQ)
     end.
+
+to_list(Item) when is_binary(Item) ->
+    binary_to_list(Item);
+to_list(undefined) ->
+    "";
+to_list(Item) when is_list(Item) ->
+    Item.
 
 %%@Doc Read the session settings from the app.conf
 get_sessions() ->
-    Sessions = application:get_env(sessions),
+    {ok,Sessions} = application:get_env(quickfix_erl,sessions),
     lists:map(fun(Session) ->
-		   S = #session_settings{
-		     begin_string = proplists:get_value(Session,begin_string),
-		     sender_comp_id = proplists:get_value(Session,sender_comp_id),
-		     sender_sub_id = proplists:get_value(Session,sender_sub_id),
-		     sender_location_id = proplists:get_value(Session,sender_location_id),
-		     target_comp_id = proplists:get_value(Session,target_comp_id),
-		     target_sub_id = proplists:get_value(Session,target_sub_id),
-		     target_location_id = proplists:get_value(Session,target_location_id),
-		     session_qualifier = proplists:get_value(Session,session_qualifier),
-		     default_appver_id = proplists:get_value(Session,default_appver_id),
-		     connection_type = proplists:get_value(Session,connection_type),
-		     use_data_dictionary = proplists:get_value(Session,use_data_dictionary,false),
-		     use_local_time = proplists:get_value(Session,use_local_time,false),
-		     start_day = proplists:get_value(Session,start_day,"mon"),
-		     start_time = proplists:get_value(Session,start_time),
-		     end_day = proplists:get_value(Session,end_day,"fri"),
-		     end_time = proplists:get_value(Session,end_time),
-		     max_latency = proplists:get_value(Session,max_latency),
-		     heartbeat_interval = proplists:get_value(Session,heartbeat_interval,60),
-		     socket_connect_host = proplists:get_value(Session,socket_connect_host),
-		     socket_connect_port = proplists:get_value(Session,socket_connect_port),
-		     socket_failover_host = proplists:get_value(Session,socket_failover_host),
-		     socket_failover_port = proplists:get_value(Session,socket_failover_port),
-		     socket_disaster_host = proplists:get_value(Session,socket_disaster_host),
-		     socket_disaster_port = proplists:get_value(Session,socket_disaster_port),
-		     reconnect_interval = proplists:get_value(Session,reconnect_interval,60),
-		     refresh_on_logon = proplists:get_value(Session,refresh_on_logon, false),
-		     reset_on_logon = proplists:get_value(Session,reset_on_logon, false),
-		     reset_on_logout = proplists:get_value(Session,reset_on_logout, false),
-		     reset_on_disconnect = proplists:get_value(Session,reset_on_disconnect, false),
-		     data_dictionary = proplists:get_value(Session,data_dictionary),
-		     logon_timeout = proplists:get_value(Session, logon_timeout, 60),
-		     logout_timeout = proplists:get_value(Session, logout_timeout, 60),
-		     send_redundant_resend_requests = proplists:get_value(Session,send_redundant_resend_requests, false),
-		     milliseconds_in_timestamp = proplists:get_value(Session,milliseconds_in_timestamp, false)
+		      S = #session_settings{
+			begin_string = proplists:get_value(begin_string,Session),
+			sender_comp_id = proplists:get_value(sender_comp_id,Session),
+			sender_sub_id = proplists:get_value(sender_sub_id,Session),
+			sender_location_id = proplists:get_value(sender_location_id,Session),
+			target_comp_id = proplists:get_value(target_comp_id,Session),
+			target_sub_id = proplists:get_value(target_sub_id,Session),
+			target_location_id = proplists:get_value(target_location_id,Session),
+			session_qualifier = proplists:get_value(session_qualifier,Session),
+			default_appver_id = proplists:get_value(default_appver_id,Session),
+			connection_type = proplists:get_value(connection_type,Session),
+			use_data_dictionary = proplists:get_value(use_data_dictionary,Session,false),
+			use_local_time = proplists:get_value(use_local_time,Session,false),
+			days = proplists:get_value(days,Session),
+			start_time = proplists:get_value(start_time,Session),
+			end_time = proplists:get_value(end_time,Session),
+			max_latency = proplists:get_value(max_latency,Session),
+			heartbeat_interval = proplists:get_value(heartbeat_interval,Session,60),
+			socket_connect_host = proplists:get_value(socket_connect_host,Session),
+			socket_connect_port = proplists:get_value(socket_connect_port,Session),
+			socket_failover_host = proplists:get_value(socket_failover_host,Session),
+			socket_failover_port = proplists:get_value(socket_failover_port,Session),
+			socket_disaster_host = proplists:get_value(socket_disaster_host,Session),
+			socket_disaster_port = proplists:get_value(socket_disaster_port,Session),
+			reconnect_interval = proplists:get_value(reconnect_interval,Session,60),
+			refresh_on_logon = proplists:get_value(refresh_on_logon,Session, false),
+			reset_on_logon = proplists:get_value(reset_on_logon,Session, false),
+			reset_on_logout = proplists:get_value(reset_on_logout,Session, false),
+			reset_on_disconnect = proplists:get_value(reset_on_disconnect,Session, false),
+			data_dictionary = proplists:get_value(data_dictionary,Session),
+			logon_timeout = proplists:get_value(logon_timeout,Session, 60),
+			logout_timeout = proplists:get_value(logout_timeout,Session, 60),
+			send_redundant_resend_requests = proplists:get_value(send_redundant_resend_requests,Session, false),
+			milliseconds_in_timestamp = proplists:get_value(milliseconds_in_timestamp,Session, false)
 		    },
 		      S#session_settings{session_id = compose_session_id(S)}
 	      end, Sessions).

@@ -2,7 +2,7 @@ all: deps
 	@rebar compile
 
 deps:
-	@rebar get-deps
+	@rebar get-deps update-deps
 
 compile:
 	@rebar compile
@@ -17,4 +17,4 @@ shell: all
 	erl -pa /home/nisbus/code/erlang/quickfix_erl/deps/erlsom/ebin /home/nisbus/code/erlang/quickfix_erl/deps/jsx/ebin
 
 run: generate
-	./rel/quickfix_erl/bin/quickfix_erl
+	./rel/quickfix_erl/bin/quickfix_erl console
