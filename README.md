@@ -1,5 +1,5 @@
 # Welcome to QuickFix Erl
-### This is a quickfix implementation in Erlang
+### This is a quickfix implementation in Erlang (still in the making)
 
 Getting started:  
   run make shell  
