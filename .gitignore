@@ -4,10 +4,7 @@
 *~*.*~*
 *.*~*
 *~*.*
-itch.txt
-tikka.txt
 *.dump
-*.txt
 /ebin/*.*
 .eunit/
 /doc/
