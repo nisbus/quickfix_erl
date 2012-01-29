@@ -91,20 +91,6 @@ parse_dict(XMLFile, XSDFile) ->
 	    {0,0,[],[],[],[],[]}
     end.
 
-get_messages(T,Header,Trailer) ->
-    lists:flatten([[T#message.fields|Header]|Trailer]).
-    
-get_msg_type(FIX,Messages) ->
-    <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
-    KV = binary:split(Rest,?SOHB,[global]),
-    KeyVals = [X || X <- KV, X =/= <<>>],
-    [_|R] = KeyVals,
-    Tp = hd(R),
-    T0 = binary:split(Tp,<<"=">>),
-    [Type] = tl(T0),
-    [M] = [X || #message{tag = T} = X <- Messages, T =:= Type],
-    M.
-
 parse_fix_msg(FIX, Message) ->
     <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
     KV = binary:split(Rest,?SOHB,[global]),
@@ -139,21 +125,6 @@ parse_fix_msg(FIX, Message) ->
 
 
     
-get_value_from_val(Value,Values) ->
-    case [Val || #value{value=V} = Val <- Values, V =:= Value] of
-	[] ->
-	    {error, value_not_found};
-	[X] ->
-	    {ok, X}
-    end.
-
-get_field_from_tag(Tag,Fields) ->
-    case [M || #field{tag =T} = M <- Fields, T =:= Tag] of
-	[] ->
-	    {error, field_not_found};
-	[U] ->
-	    {ok, U}
-    end.
 
 %%%===================================================================================
 %%% Internal Functions for generating lookups
@@ -288,6 +259,35 @@ append_defined(ID, Rest) ->
 %%%===================================================================================
 %%% Internal Functions for parsing FIX messages
 %%%===================================================================================
+get_messages(T,Header,Trailer) ->
+    lists:flatten([[T#message.fields|Header]|Trailer]).
+    
+get_msg_type(FIX,Messages) ->
+    <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
+    KV = binary:split(Rest,?SOHB,[global]),
+    KeyVals = [X || X <- KV, X =/= <<>>],
+    [_|R] = KeyVals,
+    Tp = hd(R),
+    T0 = binary:split(Tp,<<"=">>),
+    [Type] = tl(T0),
+    [M] = [X || #message{tag = T} = X <- Messages, T =:= Type],
+    M.
+
+get_value_from_val(Value,Values) ->
+    case [Val || #value{value=V} = Val <- Values, V =:= Value] of
+	[] ->
+	    {error, value_not_found};
+	[X] ->
+	    {ok, X}
+    end.
+
+get_field_from_tag(Tag,Fields) ->
+    case [M || #field{tag =T} = M <- Fields, T =:= Tag] of
+	[] ->
+	    {error, field_not_found};
+	[U] ->
+	    {ok, U}
+    end.
 
 %% print_spec(PF,PM,HF,TF) ->
 %%     	    io:format("===============================================================~n=====================HEADER====================================~n===============================================================~n~p~n",[HF]),
@@ -295,8 +295,9 @@ append_defined(ID, Rest) ->
 %% 	    io:format("===============================================================~n====================TRAILER====================================~n===============================================================~n~p~n",[TF]),
 %% 	    io:format("===============================================================~n=====================FIELDS====================================~n===============================================================~n~p~n",[PF]).
 
-test4() ->
-    parse_dict({"/home/nisbus/code/erlang/quickfix_erl/FIX42.xml","/home/nisbus/code/erlang/quickfix_erl/FIX42.xsd"},"SESSION").
+%%%===================================================================================
+%%% Internal Functions for tests
+%%%===================================================================================
 
 test() ->
     FIX = <<"8=FIX.4.29=026835=834=114152=20110428-10:07:2249=INORD50=S56=Y4857=Y48016=0.011=KODCS75UO3X5314=015=ISK17=GPCFD1-2246118=N20=037=2240738=10039=040=244=51.1000528=A48=IS000000038854=155=548259=060=20110428-10:07:22150=0151=1009140=Y5815=23109=Y4876=BOOK10=125">>,
@@ -306,6 +307,12 @@ test() ->
 	X ->
 	    X
     end.
+
+%Write a test for parsing messages to valid FIX
+%% test1() ->
+%%     Exec = [{type, executionreport}],
+%%     ok.    
+
 
 test2() ->
     File = "/home/nisbus/code/erlang/quickfix_erl/fixlog.txt",
@@ -319,6 +326,10 @@ test2() ->
 		parse_fix_msg(Msg,T)
 	end,
     for_each_line_in_file(File, F,[read], 0).
+
+test4() ->
+    parse_dict({"/home/nisbus/code/erlang/quickfix_erl/FIX42.xml","/home/nisbus/code/erlang/quickfix_erl/FIX42.xsd"},"SESSION").
+
 
 for_each_line_in_file(Name, Proc, Mode, Accum0) ->
     {ok, Device} = file:open(Name, Mode),
