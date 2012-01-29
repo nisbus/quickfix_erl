@@ -52,7 +52,9 @@ start_link(SessionSettings,HandleAdminMsg, HandleMsg) ->
 
 %%Initializes the state with session info and starts connecting
 init([#session_settings{data_dictionary = Dict, session_id = Id}= Session_Settings,HandleAdmin,HandleMsg]) ->
-    session_utils:parse_dict(Dict, Id),
+    PrivDir = code:priv_dir(quickfix_erl),
+    io:format("~p~n",[PrivDir]),
+    session_utils:parse_dict(Dict,PrivDir++"spec.xsd"),
     self() ! connect,
     {ok, disconnected, #session_state{session = Session_Settings,admin_handler = HandleAdmin, msg_handler = HandleMsg}}.
 

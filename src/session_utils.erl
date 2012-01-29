@@ -10,7 +10,11 @@
 -include("../include/session_records.hrl").
 
 %% API
--export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2,test4/0,test/0,test2/0]).
+-export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2]).
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 %%%===================================================================
 %%% API
@@ -95,36 +99,32 @@ parse_fix_msg(FIX, Message) ->
     <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
     KV = binary:split(Rest,?SOHB,[global]),
     KeyVals = [X || X <- KV, X =/= <<>>],
-    I = lists:map(fun(B) ->		      
-			  [Key,Value] = binary:split(B,<<"=">>),			  
-			  case get_field_from_tag(Key,Message) of
-			      {ok, M} ->
-				  case M#field.is_group of
-				      true ->
-					  io:format("Found group field ~p~n",[M#field.name]);
-				      false ->
-					  void
-				  end,
-				  case M#field.values of
-				      undefined -> {M#field.name, Value};
-				      Values ->
-					  case get_value_from_val(Value,Values) of
-					      {ok, X} -> 
-						  {M#field.name,X#value.name};
-					      {error,_Reason} ->
-%						  throw({error, Reason, Value})
-						  {M#field.name, Value}
-					  end
-				  end;
-			      {error, _R} -> 
-				  {Key, Value}
-%				  throw({error, R, Key})
-			  end
-		  end,KeyVals),
-    I.
-
-
-    
+    lists:map(fun(B) ->		      
+		      [Key,Value] = binary:split(B,<<"=">>),  
+		      case get_field_from_tag(Key,Message) of
+			  {ok, M} ->
+			      case M#field.is_group of
+				  true ->
+				      io:format("Found group field ~p~n",[M#field.name]);
+				  false ->
+				      void
+			      end,
+			      case M#field.values of
+				  undefined -> {M#field.name, Value};
+				  Values ->
+				      case get_value_from_val(Value,Values) of
+					  {ok, X} -> 
+					      {M#field.name,X#value.name};
+					  {error,_Reason} ->
+					      %throw({error, Reason, Value})
+					      {M#field.name, Value}
+				      end
+			      end;
+			  {error, _R} -> 
+			      {Key, Value}
+			      %throw({error, R, Key})
+		      end
+	      end,KeyVals).
 
 %%%===================================================================================
 %%% Internal Functions for generating lookups
@@ -298,26 +298,14 @@ get_field_from_tag(Tag,Fields) ->
 %%%===================================================================================
 %%% Internal Functions for tests
 %%%===================================================================================
+-ifdef(TEST).
 
-test() ->
-    FIX = <<"8=FIX.4.29=026835=834=114152=20110428-10:07:2249=INORD50=S56=Y4857=Y48016=0.011=KODCS75UO3X5314=015=ISK17=GPCFD1-2246118=N20=037=2240738=10039=040=244=51.1000528=A48=IS000000038854=155=548259=060=20110428-10:07:22150=0151=1009140=Y5815=23109=Y4876=BOOK10=125">>,
-    case catch parse_fix_msg(FIX, #session_settings{session_id = undefined, data_dictionary = undefined}) of
-	{error, Reason, Value} ->
-	    io:format("~p ~p~n",[Reason,Value]);
-	X ->
-	    X
-    end.
-
-%Write a test for parsing messages to valid FIX
-%% test1() ->
-%%     Exec = [{type, executionreport}],
-%%     ok.    
-
-
-test2() ->
-    File = "/home/nisbus/code/erlang/quickfix_erl/fixlog.txt",
-     {_Major,_Minor,Header,Messages,Trailer,_Comp,_Fields}  = parse_dict("/home/nisbus/code/erlang/quickfix_erl/FIX42.xml","/home/nisbus/code/erlang/quickfix_erl/FIX42.xsd"),
-    
+parse_file_test() ->
+    {ok,TestPath} = file:get_cwd(),
+    XML = TestPath++"/../FIX42.xml",
+    XSD = TestPath++"/../priv/spec.xsd",
+    File = TestPath++"/../fixlog.txt",
+     {_Major,_Minor,Header,Messages,Trailer,_Comp,_Fields}  = parse_dict(XML,XSD),
     F = fun(X,_) -> 
 		Split = binary:split(list_to_binary(X),<<10>>),
 		Msg = hd(Split),
@@ -327,9 +315,16 @@ test2() ->
 	end,
     for_each_line_in_file(File, F,[read], 0).
 
-test4() ->
-    parse_dict({"/home/nisbus/code/erlang/quickfix_erl/FIX42.xml","/home/nisbus/code/erlang/quickfix_erl/FIX42.xsd"},"SESSION").
-
+parse_dict_test() ->
+    {ok,TestPath} = file:get_cwd(),
+    XML = TestPath++"/../FIX42.xml",
+    XSD = TestPath++"/../priv/spec.xsd",
+    X = case parse_dict(XML,XSD) of
+    	{_Major,_Minor,_Header,_Messages,_Trailer,_Comp,_Fields} ->
+    	    true;
+    	_ -> false
+    end,
+    ?assert(true == X).
 
 for_each_line_in_file(Name, Proc, Mode, Accum0) ->
     {ok, Device} = file:open(Name, Mode),
@@ -341,3 +336,4 @@ for_each_line(Device, Proc, Accum) ->
         Line -> NewAccum = Proc(Line, Accum),
                     for_each_line(Device, Proc, NewAccum)
     end.
+-endif.

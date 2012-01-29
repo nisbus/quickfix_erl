@@ -1,4 +1,20 @@
-all:
+all: deps
 	@rebar compile
+
+deps:
+	@rebar get-deps
+
+compile:
+	@rebar compile
+
+generate: clean deps compile
+	@rebar generate
+
+clean:
+	rm -rf rel/quickfix_erl
+
 shell: all
 	erl -pa /home/nisbus/code/erlang/quickfix_erl/deps/erlsom/ebin /home/nisbus/code/erlang/quickfix_erl/deps/jsx/ebin
+
+run: generate
+	./rel/quickfix_erl/bin/quickfix_erl
