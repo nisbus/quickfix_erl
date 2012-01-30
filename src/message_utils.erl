@@ -37,21 +37,11 @@ create_msg(Msg, #session_settings{begin_string = B}) when is_binary(Msg) ->
 create_logon(#session_settings{begin_string = BS,sender_comp_id = Sender, target_comp_id = Target, heartbeat_interval = Heartbeat,reset_on_logon=Reset}) ->
     Start = <<"8=",BS/binary>>,
     Time = create_timestamp(),
-    Type = <<"34=A">>,
-    SendTag = <<"49=">>,
-    TimeTag = <<"52=">>,
-    TargetTag = <<"56=">>,
-    EncodingTag = <<"98=0">>,
-    HTag = <<"108=">>,
-    ResetTag = <<"141=">>,
-    Msg = <<Type/binary,?SOHB/binary,SendTag/binary,Sender/binary,?SOHB/binary,TimeTag/binary,Time/binary,?SOHB/binary,TargetTag/binary,Target/binary,?SOHB/binary,EncodingTag/binary,?SOHB/binary,HTag/binary,Heartbeat/binary,?SOHB/binary,ResetTag/binary,Reset/binary,?SOHB/binary>>,
+    Msg = <<<<"34=A">>/binary,?SOHB/binary,<<"49=">>/binary,Sender/binary,?SOHB/binary,<<"52=">>/binary,Time/binary,?SOHB/binary,<<"56=">>/binary,Target/binary,?SOHB/binary,<<"98=0">>/binary,?SOHB/binary,<<"108=">>/binary,Heartbeat/binary,?SOHB/binary,<<"141=">>/binary,Reset/binary,?SOHB/binary>>,
     L = bodylength(Msg),
-    LengthTag = <<"9=">>,
-    Msg0 = <<Start/binary,LengthTag/binary,L/binary,?SOHB/binary,Msg/binary>>,
+    Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
     C = checksum(Msg0),
-    CTag = <<"10=">>,
-    <<Msg0/binary,CTag/binary,C/binary>>.
-
+    <<Msg0/binary,<<"10=">>/binary,C/binary>>.
 
 create_timestamp() ->
     {{Y,M,D},{H,Min,Sec}} = erlang:localtime_to_universaltime(erlang:localtime()),
@@ -110,7 +100,5 @@ create_logon_test() ->
 checksum_test() ->
     M = <<51,52,61,65,1,52,57,61,67,76,73,95,52,52,68,1,53,50,61,50,48,49,50,48,49,50,57,45,50,51,58,50,57,58,51,53,46,50,49,48,1,53,54,61,75,89,84,69,85,65,84,95,69,66,80,1,57,56,61,48,1,49,48,56,61,54,48,1,49,52,49,61,89,1>>,
     C = checksum(M),
-    io:format(user,"Check ~p~n",[C]).
-    
-
+    io:format(user,"Check ~p~n",[C]).    
 -endif.
