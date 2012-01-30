@@ -34,8 +34,7 @@
 	  heartbeat_ref :: any(),
 	  next_sender_seq_num :: integer(),
 	  next_target_seq_num :: integer(),
-	  admin_handler :: fun(),
-	  msg_handler :: fun()
+	  messages :: [#message{}]
 	}).
 
 %%%===================================================================
@@ -59,10 +58,9 @@ init([#session_settings{data_dictionary = Dict, session_id = _Id}= Session_Setti
 		      F++"/../priv/";
 		  F -> F
 	      end,
-    {_Major,_Minor,_Header,_Messages,_Trailer,_Comp,_Fields} = session_utils:parse_dict(Dict,PrivDir++"/spec.xsd"),
+    {_Major,_Minor,Messages} = session_utils:parse_dict(Dict,PrivDir++"/spec.xsd"),
     self() ! connect,
-    
-    {ok, disconnected, #session_state{session = Session_Settings}}.
+    {ok, disconnected, #session_state{session = Session_Settings, messages = Messages}}.
 
 %%Initial connection
 disconnected(connect, #session_state{socket = Socket, session = Session} = State) when Socket == undefined ->
@@ -136,7 +134,7 @@ connected(_, #session_state{session = Session, socket = Socket} = State) ->
     lager:error("connected~n"),
     %%Send logon
     Seq = get_sequence_number(Session#session_settings.session_id),
-    I = Session#session_settings.heartbeat_interval,
+%    I = Session#session_settings.heartbeat_interval,
 %    H = start_heartbeat(I),
     Logon = message_utils:create_logon(<<"1">>,Session),
     io:format("Logon = ~s~n",[Logon]),
@@ -179,21 +177,19 @@ receiving(send_heartbeat, #session_state{socket = Socket, last_sequence_number =
     {next_state, receiving, State};
 
 %%We are receiving data, all is well
-receiving(Data, #session_state{session = Settings,admin_handler = Admin, msg_handler = Msg} = State) ->
+receiving(Data, #session_state{session = Settings, messages = Messages} = State) ->
     lager:debug("receiving data ~p~n",[Data]),
     save_message(Settings,Data),
-    Fix_Version = Settings#session_settings.begin_string,
+%    Fix_Version = Settings#session_settings.begin_string,
     TagValueList = binary:split(?SOH, Data),
     lager:debug("Msg ~p~n",[TagValueList]),
-    <<"8=",Fix_Version,?SOH,"35=",Rest>> = Data,
-    TagsAndValues = re:split(Rest,<<"=">>),
-    Type = hd(TagsAndValues),
-    case is_admin_message(binary_to_list(Type)) of
-	true ->
-	    Admin(Data);
-	false ->
-	    Msg(Data)
-    end,
+    _Type = session_utils:get_msg_type(Data,Messages),
+    %% case is_admin_message(binary_to_list(Type)) of
+    %% 	true ->
+    %% 	    Admin(Data);
+    %% 	false ->
+    %% 	    Msg(Data)
+    %% end,
     {next_state, receiving, State}.
 
 handle_event(_Event, StateName, State) ->
@@ -261,12 +257,12 @@ get_seq_from_file(SessionID) ->
 create_heartbeat_message(Seq, _Protocol) ->
     Seq.
 
--spec start_heartbeat(integer()) -> any().
-start_heartbeat(Interval) ->
-    {ok, Ref} = timer:apply_interval(Interval, ?MODULE, send_heartbeat, [self()]),
-    Ref.
+%% -spec start_heartbeat(integer()) -> any().
+%% start_heartbeat(Interval) ->
+%%     {ok, Ref} = timer:apply_interval(Interval, ?MODULE, send_heartbeat, [self()]),
+%%     Ref.
 
-stop_heartbeat(Pid) ->
+stop_heartbeat(_Pid) ->
 %    exit(Pid,normal),
     ok.
 
@@ -276,8 +272,3 @@ stop_heartbeat(Pid) ->
 
 save_message(_Settings, _Msg) ->
     ok.
-
-is_admin_message(MsgType) ->
-    lists:any(fun(X) ->
-		      X == MsgType
-	      end, ["0","A","1","1","2","3","4","5"]).    

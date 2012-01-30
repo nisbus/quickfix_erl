@@ -93,10 +93,11 @@ parse_dict(XMLFile, XSDFile) ->
 	    PM = parse_messages(Msgs),
 	    HF = parse_fields(Header),
 	    TF = parse_fields(Trailer),
-	    PM0 = fix_message_fields(PM,PF),
 	    HF0 = fix_fields(HF,PF),
 	    TF0 = fix_fields(TF,PF),
-	    {Maj,Min,HF0,PM0,TF0,_Comp,PF};
+
+	    PM0 = fix_message_fields(PM,PF,HF0,TF0),
+	    {Maj,Min,PM0};
 	Other ->
 	    lager:error("Invalid spec ~p~n",[Other]),
 	    {0,0,[],[],[],[],[]}
@@ -175,10 +176,10 @@ fix_field(MF, #field{tag = Tag, is_group=IsGroup, is_group_member = GM, values =
 	_ -> MF4#field{fields = fix_fields(Fields,Lookup)}
     end.
 	    
-fix_message_fields(Messages,Fields) ->
+fix_message_fields(Messages,Fields,Header,Trailer) ->
     lists:map(fun(M) ->
 		      F = M#message.fields,
-		      M#message{fields = fix_fields(F,Fields)}
+		      M#message{fields = lists:flatten([[fix_fields(F,Fields)|Header]|Trailer])}
 	      end,Messages).
 
 lookup_field([{field, Name,_Tag,_Req,_G,_GM,_F,_T,_V}|[]], Fields) ->
@@ -266,8 +267,6 @@ append_defined(ID, Rest) ->
 %%%===================================================================================
 %%% Internal Functions for parsing FIX messages
 %%%===================================================================================
-get_messages(T,Header,Trailer) ->
-    lists:flatten([[T#message.fields|Header]|Trailer]).
     
 get_msg_type(FIX,Messages) ->
     <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
@@ -312,13 +311,12 @@ parse_file_test() ->
     XML = TestPath++"/../FIX42.xml",
     XSD = TestPath++"/../priv/spec.xsd",
     File = TestPath++"/../fixlog.txt",
-     {_Major,_Minor,Header,Messages,Trailer,_Comp,_Fields}  = parse_dict(XML,XSD),
+     {_Major,_Minor,Messages}  = parse_dict(XML,XSD),
     F = fun(X,_) -> 
 		Split = binary:split(list_to_binary(X),<<10>>),
 		Msg = hd(Split),
-		M = get_msg_type(Msg,Messages),
-		T = get_messages(M,Header,Trailer),
-		parse_fix_msg(Msg,T)
+		_T = get_msg_type(Msg,Messages),
+		parse_fix_msg(Msg,Messages)
 	end,
     for_each_line_in_file(File, F,[read], 0).
 
@@ -327,7 +325,7 @@ parse_dict_test() ->
     XML = TestPath++"/../FIX42.xml",
     XSD = TestPath++"/../priv/spec.xsd",
     X = case parse_dict(XML,XSD) of
-    	{_Major,_Minor,_Header,_Messages,_Trailer,_Comp,_Fields} ->
+    	{_Major,_Minor,_Messages} ->
     	    true;
     	_ -> false
     end,

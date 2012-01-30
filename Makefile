@@ -15,7 +15,7 @@ clean:
 
 test: 
 	@rebar eunit skip_deps=true
-	chromium .eunit/index.html
+	chromium .eunit/index.html &
 
 shell: all
 	erl -pa /home/nisbus/code/erlang/quickfix_erl/deps/erlsom/ebin /home/nisbus/code/erlang/quickfix_erl/deps/jsx/ebin
