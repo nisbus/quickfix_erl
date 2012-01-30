@@ -2,10 +2,15 @@
  [
   {description, "Erlang FIX engine"},
   {vsn, "0.01"},
-  {registered, []},
+  {registered, [quickfix_erl_sup]},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+		  inets,
+		  sasl,
+		  lager,
+		  jsx,
+		  erlsom		  
                  ]},
   {mod, { quickfix_erl_app, []}},
   {env, []}

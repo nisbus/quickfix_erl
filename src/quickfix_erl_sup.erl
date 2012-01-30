@@ -46,5 +46,4 @@ init([]) ->
 						]
 					       },permanent, 5000, supervisor, [timed_supervisor]}
 		     end,Sessions),
-    io:format("Read sessions ~p~n",[Sups]),
     {ok, { {one_for_one, 5, 10}, Sups} }.

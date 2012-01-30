@@ -98,7 +98,7 @@ parse_dict(XMLFile, XSDFile) ->
 	    TF0 = fix_fields(TF,PF),
 	    {Maj,Min,HF0,PM0,TF0,_Comp,PF};
 	Other ->
-	    io:format("Invalid spec ~p~n",[Other]),
+	    lager:error("Invalid spec ~p~n",[Other]),
 	    {0,0,[],[],[],[],[]}
     end.
 
@@ -112,7 +112,7 @@ parse_fix_msg(FIX, Message) ->
 			  {ok, M} ->
 			      case M#field.is_group of
 				  true ->
-				      io:format("Found group field ~p~n",[M#field.name]);
+				      lager:debug("Found group field ~p~n",[M#field.name]);
 				  false ->
 				      void
 			      end,

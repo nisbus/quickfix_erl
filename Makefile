@@ -13,6 +13,10 @@ generate: clean deps compile
 clean:
 	rm -rf rel/quickfix_erl
 
+test: 
+	@rebar eunit skip_deps=true
+	chromium .eunit/index.html
+
 shell: all
 	erl -pa /home/nisbus/code/erlang/quickfix_erl/deps/erlsom/ebin /home/nisbus/code/erlang/quickfix_erl/deps/jsx/ebin
 
