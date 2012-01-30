@@ -138,7 +138,7 @@ connected(_, #session_state{session = Session, socket = Socket} = State) ->
     Seq = get_sequence_number(Session#session_settings.session_id),
     I = Session#session_settings.heartbeat_interval,
 %    H = start_heartbeat(I),
-    Logon = message_utils:create_logon(Session),
+    Logon = message_utils:create_logon(<<"1">>,Session),
     io:format("Logon = ~s~n",[Logon]),
     try gen_tcp:send(Socket, Logon) of
 	{error, Reason} ->
@@ -252,10 +252,10 @@ get_seq_from_file(SessionID) ->
     File = SessionID++".seq",
     case file:read_file(File) of
 	{ok, S} ->
-	    binary_to_list(list_to_integer(S));
+	    list_to_binary(list_to_integer(S));
 	{error, Reason} ->
 	    lager:error("Error reading seq file ~p~n",[Reason]),
-	    1
+	    list_to_binary(integer_to_list(1))
     end.
 
 create_heartbeat_message(Seq, _Protocol) ->
