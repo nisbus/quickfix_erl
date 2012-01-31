@@ -137,21 +137,17 @@ connected(_, #session_state{session = Session, socket = Socket} = State) ->
 %    I = Session#session_settings.heartbeat_interval,
 %    H = start_heartbeat(I),
     Logon = message_utils:create_logon(<<"1">>,Session),
-    io:format("Logon = ~s~n",[Logon]),
     try gen_tcp:send(Socket, Logon) of
 	{error, Reason} ->
 	    lager:error("Error logging in ~p~n",[Reason]);
 	ok ->
-	    lager:error("Sent logon~n")
+	    lager:error("Sent logon: ~s~n",[Logon]),
+	    NextSeq = increment_sequence(Seq),
+	    set_sequence_number(NextSeq),
+	    ?MODULE:logged_on(undefined,State)
     catch
 	Ex ->
 	    lager:error("Error sending login~p~n",[Ex])
-    end,
-    case gen_tcp:recv(Socket, 0, 10000) of
-	{ok,D} ->
-	    lager:error("Data received ~p~n",[D]);
-	Other ->
-	    lager:error("Other received ~p~n",[Other])
     end,
     {next_state, logged_on, State#session_state{last_sequence_number = Seq}}.
 
@@ -159,7 +155,35 @@ logged_on({error, _Reason}, State) ->
     {next_state, disconnected, State};
 
 %%We are logged on, start the heartbeat timer and wait for data
-logged_on(_, State) ->
+logged_on(_, #session_state{socket = Socket, session = Session, messages = Messages} = State) ->
+    case gen_tcp:recv(Socket, 0) of
+	{ok,D} ->
+	    Message = session_utils:get_msg_type(D,Messages),
+	    Msg = session_utils:parse_fix_msg(D,Message),
+	    JSON = jsx:term_to_json(Msg),
+	    
+	    lager:error("Parsed message ~p~n",[JSON]),
+	    case proplists:get_value(msgtype,Msg) of
+		undefined ->
+		    logged_on(undefined,State);	
+		<<"heartbeat">> ->
+		    Seq = get_sequence_number(Session#session_settings.session_id),
+		    gen_tcp:send(Socket,message_utils:create_heartbeat(Seq,Session)),
+		    NextSeq = increment_sequence(Seq),
+		    set_sequence_number(NextSeq),
+		    ?MODULE:logged_on(undefined,State);
+		<<"logon">> ->
+		    ?MODULE:logged_on(undefined,State);
+		<<"logout">> ->
+		    Text = proplists:get_value(text,Msg),
+		    lager:error("Logged off ~p~n",[Text]);
+		_ ->
+		    ?MODULE:logged_on(undefined,State)
+	    end;
+	Other ->
+	    lager:error("Other received ~p~n",[Other]),
+	    ?MODULE:logged_on(undefined,State)
+    end,
     {next_state, receiving, State}.
 
 %%We are logged off so we connect again
@@ -231,13 +255,21 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 get_sequence_number(SessionID) ->
     case erlang:get(seq) of
-	undefined -> get_seq_from_file(SessionID);
-	Seq when is_integer(Seq) ->
+	undefined -> 
+	    S = get_seq_from_file(SessionID),
+	    set_sequence_number(S),
+	    lager:debug("Returning seq ~p~n",[S]),
+	    S;
+	Seq when is_binary(Seq) ->
 	    Seq
     end.
 
-set_sequence_number(Seq) ->
-    erlang:put(seq, Seq).
+set_sequence_number(Seq) when is_integer(Seq) ->
+    S = list_to_binary(integer_to_list(Seq)),
+    erlang:put(seq, S);
+set_sequence_number(Seq) when is_binary(Seq) ->
+    erlang:put(seq,Seq).
+
 
 %% save_seq_to_file(SessionID) ->
 %%     Seq = get_sequence_number(SessionID),
@@ -248,8 +280,8 @@ get_seq_from_file(SessionID) ->
     File = SessionID++".seq",
     case file:read_file(File) of
 	{ok, S} ->
-	    list_to_binary(list_to_integer(S));
-	{error, Reason} ->
+	    S;
+	{error, Reason} ->	    
 	    lager:error("Error reading seq file ~p~n",[Reason]),
 	    list_to_binary(integer_to_list(1))
     end.
@@ -272,3 +304,7 @@ stop_heartbeat(_Pid) ->
 
 save_message(_Settings, _Msg) ->
     ok.
+increment_sequence(Seq) when is_binary(Seq) ->
+    list_to_integer(binary_to_list(Seq))+1;
+increment_sequence(Seq) when is_integer(Seq) ->
+    Seq+1.

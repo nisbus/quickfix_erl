@@ -1,5 +1,5 @@
 -define(SOH, 16#01).
--define(SOHB, <<00000001>>).
+-define(SOHB, <<2#01>>).
 
 -define(KEYTOTAG(Key,Prop),proplists:get_value(Prop,Key)).
 -define(TAGTOKEY(Tag,Prop), proplists:get_key(Prop,Tag)). 

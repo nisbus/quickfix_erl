@@ -9,7 +9,7 @@
 -module(message_utils).
 -include("../include/session_records.hrl").
 %% API
--export([create_msg/2, create_logon/2, msg_to_proplist/1,proplist_to_msg/2]).
+-export([create_msg/2, create_logon/2, create_heartbeat/2, msg_to_proplist/1,proplist_to_msg/2]).
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
@@ -55,7 +55,17 @@ create_logon(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender, ta
     L = bodylength(Msg),
     Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
     C = checksum_as_binary(Msg0),
-    <<Msg0/binary,<<"10=">>/binary,C/binary>>.
+    <<Msg0/binary,<<"10=">>/binary,C/binary,?SOHB/binary>>.
+
+create_heartbeat(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender, target_comp_id = Target}) ->
+    Start = <<"8=",BS/binary,?SOHB/binary>>,
+    Time = create_timestamp(),
+
+    Msg = <<<<"35=0">>/binary,?SOHB/binary,<<"34=">>/binary,Seq/binary,?SOHB/binary,<<"49=">>/binary,Sender/binary,?SOHB/binary,<<"52=">>/binary,Time/binary,?SOHB/binary,<<"56=">>/binary,Target/binary,?SOHB/binary>>,
+    L = bodylength(Msg),
+    Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
+    C = checksum_as_binary(Msg0),
+    <<Msg0/binary,<<"10=">>/binary,C/binary,?SOHB/binary>>.
 
 create_timestamp() ->
     {{Y,M,D},{H,Min,Sec}} = erlang:localtime_to_universaltime(erlang:localtime()),
@@ -70,7 +80,6 @@ create_timestamp() ->
     Sec0 = string:right(integer_to_list(Sec),2,$0),
     Mil0 = string:right(integer_to_list(Mill),3,$0),
     list_to_binary(Y0++M0++D0++DS++H0++TS++Min0++TS++Sec0++"."++Mil0).
-
     
 msg_to_proplist(Msg) ->
     KeyValue = binary:split(Msg, ?SOHB,[global]),
@@ -93,7 +102,7 @@ checksum_as_binary(Data) ->
     to_binary(checksum(Data)).
 
 bodylength(Msg) ->
-    list_to_binary(string:right(integer_to_list(length(binary_to_list(Msg))),4,$0)).    
+    list_to_binary(integer_to_list(length(binary_to_list(Msg)))).    
 
 -ifdef(TEST).
 
@@ -123,7 +132,7 @@ create_msg_test() ->
     M = <<51,52,61,65,1,52,57,61,67,76,73,95,52,52,68,1,53,50,61,50,48,49,50,48,49,50,57,45,50,51,58,50,57,58,51,53,46,50,49,48,1,53,54,61,75,89,84,69,85,65,84,95,69,66,80,1,57,56,61,48,1,49,48,56,61,54,48,1,49,52,49,61,89,1>>,
     io:format(user,"~s~n",[create_msg(M,#session_settings{begin_string = <<"FIX.4.2">>})]).
 
-%%TODO: FIX this test
+%% %%TODO: FIX this test
 %% proplist_to_msg_test() ->    
 %%     S = #session_settings{begin_string = <<"FIX.4.2">>,sender_comp_id = <<"Sender">>, target_comp_id = <<"CompID">>, heartbeat_interval = list_to_binary(integer_to_list(60)),reset_on_logon= <<"Y">>},
 %%     M = create_logon(<<1>>,S),

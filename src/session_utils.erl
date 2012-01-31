@@ -10,7 +10,7 @@
 -include("../include/session_records.hrl").
 
 %% API
--export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2,to_list/1]).
+-export([compose_session_id/1,get_sessions/0,parse_dict/2, parse_fix_msg/2,to_list/1,get_msg_type/2]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -109,7 +109,7 @@ parse_fix_msg(FIX, Message) ->
     KeyVals = [X || X <- KV, X =/= <<>>],
     lists:map(fun(B) ->		      
 		      [Key,Value] = binary:split(B,<<"=">>),  
-		      case get_field_from_tag(Key,Message) of
+		      case get_field_from_tag(Key,Message#message.fields) of
 			  {ok, M} ->
 			      case M#field.is_group of
 				  true ->
@@ -118,10 +118,12 @@ parse_fix_msg(FIX, Message) ->
 				      void
 			      end,
 			      case M#field.values of
-				  undefined -> {M#field.name, Value};
+				  undefined -> 
+				      T = M#field.type,
+				      {M#field.name, translate_value(Value,T)};
 				  Values ->
 				      case get_value_from_val(Value,Values) of
-					  {ok, X} -> 
+					  {ok, X} ->
 					      {M#field.name,X#value.name};
 					  {error,_Reason} ->
 					      %throw({error, Reason, Value})
@@ -137,6 +139,23 @@ parse_fix_msg(FIX, Message) ->
 %%%===================================================================================
 %%% Internal Functions for generating lookups
 %%%===================================================================================
+translate_value(Value, "INTEGER") ->
+    list_to_integer(binary_to_list(Value));
+translate_value(Value, "FLOAT") ->
+    list_to_float(binary_to_list(Value));
+translate_value(Value, "STRING") ->
+    Value;
+translate_value(Value, "QTY") ->
+    translate_value(Value,"INTEGER");
+translate_value(Value, "INT") ->
+    translate_value(Value,"INTEGER");
+translate_value(Value,"UTCTIMESTAMP") ->
+    timestamp_to_string(Value);
+translate_value(Value,_) ->    
+    Value.
+
+timestamp_to_string(<<Y:4/binary,MM:2/binary,DD:2/binary,"-",Time/binary>>) ->
+    list_to_binary(binary_to_list(Y)++"-"++binary_to_list(MM)++"-"++binary_to_list(DD)++" "++binary_to_list(Time)).
 
 fix_fields(undefined, _) ->
     undefined;
@@ -315,8 +334,9 @@ parse_file_test() ->
     F = fun(X,_) -> 
 		Split = binary:split(list_to_binary(X),<<10>>),
 		Msg = hd(Split),
-		_T = get_msg_type(Msg,Messages),
-		parse_fix_msg(Msg,Messages)
+		T = get_msg_type(Msg,Messages),
+
+		parse_fix_msg(Msg,T)
 	end,
     for_each_line_in_file(File, F,[read], 0).
 

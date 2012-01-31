@@ -13,7 +13,7 @@ generate: clean deps compile
 clean:
 	rm -rf rel/quickfix_erl
 
-test: 
+test: compile
 	@rebar eunit skip_deps=true
 	chromium .eunit/index.html &
 
