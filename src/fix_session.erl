@@ -263,13 +263,16 @@ handle_message(#message{is_admin = true, tag = <<"1">>, fields = Fields}, Parsed
 %%RESEND REQUEST
 handle_message(#message{is_admin = true, tag = <<"2">>}, ParsedMsg, State) ->
     ?MODULE:logged_on(undefined,State);
+
 %%REJECT
 handle_message(#message{is_admin = true, tag = <<"3">>, fields = Fields}, ParsedMsg, _State) ->
     Text = proplists:get_value(text,Fields),
     lager:error("Rejected ~p~n",[Text]);
+
 %%SEQUENCE RESET
 handle_message(#message{is_admin = true, tag = <<"4">>}, ParsedMsg, State) ->
     ?MODULE:logged_on(undefined,State);
+
 %%LOGOUT
 handle_message(#message{is_admin = true, tag = <<"5">>,fields = Fields}, ParsedMsg, _State) ->
     Text = proplists:get_value(text,Fields),
