@@ -30,6 +30,10 @@ start_link() ->
 
 init([]) ->
     Sessions = session_utils:get_sessions(),
+    lists:foreach(fun(S) ->
+			  message_store:initialize(S#session_settings.session_id)
+		  end,Sessions),
+
     Sups = lists:map(fun(S) ->
 			     Days = S#session_settings.days,
 			     Start = S#session_settings.start_time,
@@ -46,4 +50,6 @@ init([]) ->
 						]
 					       },permanent, 5000, supervisor, [timed_supervisor]}
 		     end,Sessions),
+
+
     {ok, { {one_for_one, 5, 10}, Sups} }.

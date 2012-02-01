@@ -9,7 +9,7 @@
 -module(message_utils).
 -include("../include/session_records.hrl").
 %% API
--export([create_msg/2, create_logon/2, create_heartbeat/2, msg_to_proplist/1,proplist_to_msg/2]).
+-export([create_msg/2, create_logon/2, create_heartbeat/2, create_heartbeat/3, msg_to_proplist/1,proplist_to_msg/2]).
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
@@ -43,10 +43,9 @@ to_binary(X) when is_integer(X) ->
      
 create_msg(Msg, #session_settings{begin_string = B}) when is_binary(Msg) ->
     L = bodylength(Msg),
-    LTag = <<"9=">>,
-    Msg0 = <<<<"8=">>/binary,B/binary,?SOHB/binary,LTag/binary,L/binary,?SOHB/binary,Msg/binary>>,
+    Msg0 = <<<<"8=">>/binary,B/binary,?SOHB/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
     C = checksum_as_binary(Msg0),
-    <<Msg0/binary,?SOHB/binary,LTag/binary,L/binary,?SOHB/binary,Msg/binary,<<"10=">>/binary,C/binary>>.
+    <<Msg0/binary,?SOHB/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary,<<"10=">>/binary,C/binary>>.
 
 create_logon(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender, target_comp_id = Target, heartbeat_interval = Heartbeat,reset_on_logon=Reset}) ->
     Start = <<"8=",BS/binary,?SOHB/binary>>,
@@ -62,6 +61,16 @@ create_heartbeat(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender
     Time = create_timestamp(),
 
     Msg = <<<<"35=0">>/binary,?SOHB/binary,<<"34=">>/binary,Seq/binary,?SOHB/binary,<<"49=">>/binary,Sender/binary,?SOHB/binary,<<"52=">>/binary,Time/binary,?SOHB/binary,<<"56=">>/binary,Target/binary,?SOHB/binary>>,
+    L = bodylength(Msg),
+    Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
+    C = checksum_as_binary(Msg0),
+    <<Msg0/binary,<<"10=">>/binary,C/binary,?SOHB/binary>>.
+
+create_heartbeat(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender, target_comp_id = Target},ReqId) ->
+    Start = <<"8=",BS/binary,?SOHB/binary>>,
+    Time = create_timestamp(),
+
+    Msg = <<<<"35=0">>/binary,?SOHB/binary,<<"34=">>/binary,Seq/binary,?SOHB/binary,<<"49=">>/binary,Sender/binary,?SOHB/binary,<<"52=">>/binary,Time/binary,?SOHB/binary,<<"56=">>/binary,Target/binary,?SOHB/binary,<<"112=">>/binary,ReqId/binary,?SOHB/binary>>,
     L = bodylength(Msg),
     Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
     C = checksum_as_binary(Msg0),

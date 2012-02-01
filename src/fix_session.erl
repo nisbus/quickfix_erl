@@ -2,7 +2,7 @@
 %%% @author nisbus <nisbus@gmail.com>
 %%% @copyright (C) nisbus 2011, 
 %%% @doc
-%%%
+%%%   Manages the FIX Session state and everything else :)
 %%% @end
 %%% Created :  8 Nov 2011 by nisbus <nisbus@gmail.com>
 %%%-------------------------------------------------------------------
@@ -15,12 +15,16 @@
 
 %% gen_fsm callbacks
 -export([init/1, handle_event/3,
-	 handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
-
--compile([{parse_transform, lager_transform}]).
+	 handle_sync_event/4, handle_info/3, 
+	 terminate/3, code_change/4]).
 
 %%gen_fsm states
--export([disconnected/2, connected/2, logged_on/2, logged_off/2, receiving/2]).
+-export([disconnected/2, connected/2, 
+	 logged_on/2, logged_off/2]).
+
+-export([send/2]).
+
+-compile([{parse_transform, lager_transform}]).
 
 -define(SERVER, ?MODULE).
 
@@ -43,9 +47,13 @@
 
 %%Starts the server and begins connecting
 -spec start_link(#session_settings{}) -> ok.
-start_link(SessionSettings) ->
-    gen_fsm:start_link({local, ?SERVER}, ?MODULE,[SessionSettings],[]).
+start_link(#session_settings{session_id = Id} = SessionSettings) ->
+    lager:debug("Starting session ~p~n",[Id]),
+    Name = list_to_atom(Id),
+    gen_fsm:start_link({local, Name}, ?MODULE,[SessionSettings],[]).
 
+send(Id,Msg) ->
+    gen_fsm:send_event(Id,{send,Msg}).
 %%%===================================================================
 %%% gen_fsm callbacks
 %%%===================================================================
@@ -59,10 +67,29 @@ init([#session_settings{data_dictionary = Dict, session_id = _Id}= Session_Setti
 		  F -> F
 	      end,
     {_Major,_Minor,Messages} = session_utils:parse_dict(Dict,PrivDir++"/spec.xsd"),
+    lager:debug("Connecting ~p~n",[_Id]),
     self() ! connect,
     {ok, disconnected, #session_state{session = Session_Settings, messages = Messages}}.
 
-%%Initial connection
+%%##########################################################################
+%%                              STATE MATRIX
+%%##########################################################################
+%%==========================================================================
+%%|              | disconnected |  connected  |  logged_off  |  logged_on  |
+%%|--------------|--------------|-------------|--------------|-------------|
+%%| disconnected |      X       |      X      |              |             |
+%%|--------------|--------------|-------------|--------------|-------------|
+%%|  connected   |      X       |             |              |      X      |
+%%|--------------|--------------|-------------|--------------|-------------|
+%%|  logged_on   |      X       |             |      X       |      X      |
+%%|--------------|--------------|-------------|--------------|-------------|
+%%|  logged_off  |      X       |             |      X       |             |
+%%|--------------|--------------|-------------|--------------|-------------|
+%%==========================================================================
+
+%%##########################################################################
+%%                          DISCONNECTED
+%%##########################################################################
 disconnected(connect, #session_state{socket = Socket, session = Session} = State) when Socket == undefined ->
     lager:debug("disconnected, with tcp = undefined~n"),
     %%Create TCP and move on
@@ -77,7 +104,6 @@ disconnected(connect, #session_state{socket = Socket, session = Session} = State
 	    ?MODULE:disconnected(failover, State)
     end;
 
-%%Connect failed
 disconnected(failover, #session_state{session=Session} =  State) ->
     lager:debug("disconnected, failover~n"),
     IP = Session#session_settings.socket_failover_host,
@@ -95,7 +121,6 @@ disconnected(failover, #session_state{session=Session} =  State) ->
 	    ?MODULE:disconnected(disaster, State)
     end;
 
-%%Failover didn't manage to connect
 disconnected(disaster, #session_state{session=Session} =  State) ->
     lager:debug("disconnected, disaster~n"),
     IP = Session#session_settings.socket_disaster_host,
@@ -113,17 +138,15 @@ disconnected(disaster, #session_state{session=Session} =  State) ->
 	    ?MODULE:disconnected(connect, State)
     end;
 
-%%The connection is closed with the market
-disconnected(closed, #session_state{session = Session, heartbeat_ref = H} = State) ->
-    lager:debug("disconnected, closed~n"),
-    case Session#session_settings.reset_on_disconnect of
-	true ->
-	    set_sequence_number(1);
-	_ -> void
-    end,
-
-    stop_heartbeat(H),
+disconnected({send, _}, State) ->
+    lager:error("Can't send message in disconnected state~n"),
+    throw({error, disconnected}),
     {next_state, disconnected, State}.
+
+
+%%##########################################################################
+%%                          CONNECTED
+%%##########################################################################
 
 connected({error, _Reason}, State) ->
     lager:debug("connected, error~n"),
@@ -131,17 +154,17 @@ connected({error, _Reason}, State) ->
 
 %%We are connected and send the login message
 connected(_, #session_state{session = Session, socket = Socket} = State) ->
-    lager:error("connected~n"),
-    %%Send logon
+    lager:debug("connected~n"),
     Seq = get_sequence_number(Session#session_settings.session_id),
-%    I = Session#session_settings.heartbeat_interval,
-%    H = start_heartbeat(I),
+
+    %%Send logon
     Logon = message_utils:create_logon(<<"1">>,Session),
+    message_store:save_msg(Session#session_settings.session_id,Logon),
     try gen_tcp:send(Socket, Logon) of
 	{error, Reason} ->
 	    lager:error("Error logging in ~p~n",[Reason]);
 	ok ->
-	    lager:error("Sent logon: ~s~n",[Logon]),
+	    lager:debug("Sent logon: ~s~n",[Logon]),
 	    NextSeq = increment_sequence(Seq),
 	    set_sequence_number(NextSeq),
 	    ?MODULE:logged_on(undefined,State)
@@ -151,88 +174,45 @@ connected(_, #session_state{session = Session, socket = Socket} = State) ->
     end,
     {next_state, logged_on, State#session_state{last_sequence_number = Seq}}.
 
-logged_on({error, _Reason}, State) ->
-    {next_state, disconnected, State};
+%%##########################################################################
+%%                          LOGGED ON
+%%##########################################################################
 
-%%We are logged on, start the heartbeat timer and wait for data
-logged_on(_, #session_state{socket = Socket, session = Session, messages = Messages} = State) ->
+logged_on({send,Msg}, #session_state{socket = Socket, session = Session} = State) ->
+    I = message_utils:proplist_to_msg(Msg,Session),
+    FIX = message_utils:create_msg(I,Session),
+    message_store:save_msg(Session#session_settings.session_id,FIX),
+    gen_tcp:send(Socket,FIX),
+    ?MODULE:logged_on(undefined, State);
+
+logged_on(_, #session_state{socket = Socket, messages = Messages, session = Session} = State) ->
     case gen_tcp:recv(Socket, 0) of
 	{ok,D} ->
-	    Message = session_utils:get_msg_type(D,Messages),
-	    Msg = session_utils:parse_fix_msg(D,Message),
-	    JSON = jsx:term_to_json(Msg),
-	    
-	    lager:error("Parsed message ~p~n",[JSON]),
-	    case proplists:get_value(msgtype,Msg) of
-		undefined ->
-		    logged_on(undefined,State);	
-		<<"heartbeat">> ->
-		    Seq = get_sequence_number(Session#session_settings.session_id),
-		    gen_tcp:send(Socket,message_utils:create_heartbeat(Seq,Session)),
-		    NextSeq = increment_sequence(Seq),
-		    set_sequence_number(NextSeq),
-		    ?MODULE:logged_on(undefined,State);
-		<<"logon">> ->
-		    ?MODULE:logged_on(undefined,State);
-		<<"logout">> ->
-		    Text = proplists:get_value(text,Msg),
-		    lager:error("Logged off ~p~n",[Text]);
-		_ ->
-		    ?MODULE:logged_on(undefined,State)
-	    end;
-	Other ->
-	    lager:error("Other received ~p~n",[Other]),
-	    ?MODULE:logged_on(undefined,State)
+	    message_store:save_msg(Session#session_settings.session_id,D),
+	    MessageDef = session_utils:get_msg_type(D,Messages),
+	    Msg = session_utils:parse_fix_msg(D,MessageDef),
+	    handle_message(MessageDef,Msg,State),
+	    ?MODULE:logged_on(undefined,State);	    
+	_Other ->
+	    ?MODULE:logged_off(undefined,State)
     end,
-    {next_state, receiving, State}.
+    {next_state, logged_on, State}.
 
 %%We are logged off so we connect again
 logged_off(_, State) ->
-    {next_state, connect, State}.
+    {next_state, logged_on, State}.
 
-receiving(error, State) ->
-    lager:error("receiving, error~n"),
-    {next_state, connect, State};
 
-receiving(send_heartbeat, #session_state{socket = Socket, last_sequence_number = Seq, session = Info} = State) ->
-    lager:debug("sending heartbeat~n"),
-    Version = Info#session_settings.begin_string,
-    gen_tcp:send(Socket, create_heartbeat_message(Seq+1, Version)),
-    {next_state, receiving, State};
-
-%%We are receiving data, all is well
-receiving(Data, #session_state{session = Settings, messages = Messages} = State) ->
-    lager:debug("receiving data ~p~n",[Data]),
-    save_message(Settings,Data),
-%    Fix_Version = Settings#session_settings.begin_string,
-    TagValueList = binary:split(?SOH, Data),
-    lager:debug("Msg ~p~n",[TagValueList]),
-    _Type = session_utils:get_msg_type(Data,Messages),
-    %% case is_admin_message(binary_to_list(Type)) of
-    %% 	true ->
-    %% 	    Admin(Data);
-    %% 	false ->
-    %% 	    Msg(Data)
-    %% end,
-    {next_state, receiving, State}.
+handle_event({send,Msg}, StateName, State)->
+    ?MODULE:StateName({send, Msg},State);
 
 handle_event(_Event, StateName, State) ->
+    lager:debug("Received unknown event ~p~n",[_Event]),
     {next_state, StateName, State}.
 
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = ok,
     {reply, Reply, StateName, State}.
-
-handle_info({tcp, Socket, Data}, StateName, #session_state{socket=Socket} = State) ->
-    lager:debug("handle info, data ~p~n",[Data]),
-    % Flow control: enable forwarding of next TCP message
-    inet:setopts(Socket, [{active, once}]),
-    ?MODULE:StateName({data, Data}, State);
-
-handle_info({tcp_closed, Socket}, _StateName, #session_state{socket=Socket} = StateData) ->
-    lager:debug("handle info, closed~n"),
-    error_logger:info_msg("~p Client disconnected.\n", [self()]),
-    {stop, normal, StateData};
 
 handle_info(connect, StateName, State) ->
     lager:debug("handle info, connect~n"),
@@ -242,9 +222,8 @@ handle_info(Info, StateName, StateData) ->
     lager:debug("handle info, ~p, ~p~n",[Info, StateName]),
     {noreply, StateName, StateData}.
 
-terminate(_Reason, _StateName, #session_state{socket = Socket, heartbeat_ref = H}) ->
+terminate(_Reason, _StateName, #session_state{socket = Socket}) ->
     (catch gen_tcp:close(Socket)),
-    stop_heartbeat(H),
     ok.
 
 code_change(_OldVsn, StateName, State, _Extra) ->
@@ -253,6 +232,59 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+%%%=======================================================================================
+%%%             ADMIN MESSAGES
+%%%=======================================================================================
+%%LOGON
+handle_message(#message{is_admin = true, tag = <<"A">>}, ParsedMsg, State) ->
+    ?MODULE:logged_on(undefined,State);
+
+%%HEARTBEAT
+handle_message(#message{is_admin = true, tag = <<"0">>}, ParsedMsg, #session_state{session = Session, socket = Socket} = State) ->
+    Seq = get_sequence_number(Session#session_settings.session_id),
+    Heartbeat = message_utils:create_heartbeat(Seq,Session),
+    message_store:save_msg(Session#session_settings.session_id,Heartbeat),
+    gen_tcp:send(Socket,Heartbeat),
+    NextSeq = increment_sequence(Seq),
+    set_sequence_number(NextSeq),
+    ?MODULE:logged_on(undefined,State);
+
+ %%TEST REQUEST
+handle_message(#message{is_admin = true, tag = <<"1">>, fields = Fields}, ParsedMsg, #session_state{session = Session, socket = Socket} = State) ->
+    ReqId = proplists:get_value(<<"testreqid">>,Fields),
+    Seq = get_sequence_number(Session#session_settings.session_id),
+    Heartbeat = message_utils:create_heartbeat(Seq,Session,ReqId),
+    message_store:save_msg(Session#session_settings.session_id,Heartbeat),
+    gen_tcp:send(Socket,Heartbeat),
+    NextSeq = increment_sequence(Seq),
+    set_sequence_number(NextSeq),
+    ?MODULE:logged_on(undefined,State);
+
+%%RESEND REQUEST
+handle_message(#message{is_admin = true, tag = <<"2">>}, ParsedMsg, State) ->
+    ?MODULE:logged_on(undefined,State);
+%%REJECT
+handle_message(#message{is_admin = true, tag = <<"3">>, fields = Fields}, ParsedMsg, _State) ->
+    Text = proplists:get_value(text,Fields),
+    lager:error("Rejected ~p~n",[Text]);
+%%SEQUENCE RESET
+handle_message(#message{is_admin = true, tag = <<"4">>}, ParsedMsg, State) ->
+    ?MODULE:logged_on(undefined,State);
+%%LOGOUT
+handle_message(#message{is_admin = true, tag = <<"5">>,fields = Fields}, ParsedMsg, _State) ->
+    Text = proplists:get_value(text,Fields),
+    lager:error("Logged off ~p~n",[Text]);
+
+%%%=======================================================================================
+%%%             APPLICATION MESSAGES
+%%%=======================================================================================
+handle_message(_MsgDef, _ParsedMsg, State) ->
+    ?MODULE:logged_on(undefined,State).
+
+%%%=======================================================================================
+%%%             Sequence number handling
+%%%=======================================================================================
+
 get_sequence_number(SessionID) ->
     case erlang:get(seq) of
 	undefined -> 
@@ -270,12 +302,6 @@ set_sequence_number(Seq) when is_integer(Seq) ->
 set_sequence_number(Seq) when is_binary(Seq) ->
     erlang:put(seq,Seq).
 
-
-%% save_seq_to_file(SessionID) ->
-%%     Seq = get_sequence_number(SessionID),
-%%     File = SessionID++".seq",
-%%     file:write_file(File,list_to_binary(integer_to_list(Seq))).
-
 get_seq_from_file(SessionID) ->
     File = SessionID++".seq",
     case file:read_file(File) of
@@ -286,24 +312,6 @@ get_seq_from_file(SessionID) ->
 	    list_to_binary(integer_to_list(1))
     end.
 
-create_heartbeat_message(Seq, _Protocol) ->
-    Seq.
-
-%% -spec start_heartbeat(integer()) -> any().
-%% start_heartbeat(Interval) ->
-%%     {ok, Ref} = timer:apply_interval(Interval, ?MODULE, send_heartbeat, [self()]),
-%%     Ref.
-
-stop_heartbeat(_Pid) ->
-%    exit(Pid,normal),
-    ok.
-
-%% -spec send_heartbeat(pid()) -> ok.
-%% send_heartbeat(Self) ->
-%%     Self ! send_heartbeat.
-
-save_message(_Settings, _Msg) ->
-    ok.
 increment_sequence(Seq) when is_binary(Seq) ->
     list_to_integer(binary_to_list(Seq))+1;
 increment_sequence(Seq) when is_integer(Seq) ->

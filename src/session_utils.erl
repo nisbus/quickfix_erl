@@ -136,6 +136,17 @@ parse_fix_msg(FIX, Message) ->
 		      end
 	      end,KeyVals).
 
+get_msg_type(FIX,Messages) ->
+    <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
+    KV = binary:split(Rest,?SOHB,[global]),
+    KeyVals = [X || X <- KV, X =/= <<>>],
+    [_|R] = KeyVals,
+    Tp = hd(R),
+    T0 = binary:split(Tp,<<"=">>),
+    [Type] = tl(T0),
+    [M] = [X || #message{tag = T} = X <- Messages, T =:= Type],
+    M.
+
 %%%===================================================================================
 %%% Internal Functions for generating lookups
 %%%===================================================================================
@@ -287,16 +298,6 @@ append_defined(ID, Rest) ->
 %%% Internal Functions for parsing FIX messages
 %%%===================================================================================
     
-get_msg_type(FIX,Messages) ->
-    <<"8=FIX.",_Maj:1/binary,".",_Min:1/binary,?SOH,Rest/binary>> = FIX,
-    KV = binary:split(Rest,?SOHB,[global]),
-    KeyVals = [X || X <- KV, X =/= <<>>],
-    [_|R] = KeyVals,
-    Tp = hd(R),
-    T0 = binary:split(Tp,<<"=">>),
-    [Type] = tl(T0),
-    [M] = [X || #message{tag = T} = X <- Messages, T =:= Type],
-    M.
 
 get_value_from_val(Value,Values) ->
     case [Val || #value{value=V} = Val <- Values, V =:= Value] of
