@@ -251,7 +251,7 @@ handle_message(#message{is_admin = true, tag = <<"0">>}, ParsedMsg, #session_sta
 
  %%TEST REQUEST
 handle_message(#message{is_admin = true, tag = <<"1">>, fields = Fields}, ParsedMsg, #session_state{session = Session, socket = Socket} = State) ->
-    ReqId = proplists:get_value(<<"testreqid">>,Fields),
+    ReqId = proplists:get_value(testreqid,ParsedMsg),
     Seq = get_sequence_number(Session#session_settings.session_id),
     Heartbeat = message_utils:create_heartbeat(Seq,Session,ReqId),
     message_store:save_msg(Session#session_settings.session_id,Heartbeat),

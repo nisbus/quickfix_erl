@@ -67,9 +67,9 @@ create_heartbeat(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender
     <<Msg0/binary,<<"10=">>/binary,C/binary,?SOHB/binary>>.
 
 create_heartbeat(Seq,#session_settings{begin_string = BS,sender_comp_id = Sender, target_comp_id = Target},ReqId) ->
+    lager:debug("Creating heartbeat from test request ~p~n",[ReqId]),
     Start = <<"8=",BS/binary,?SOHB/binary>>,
     Time = create_timestamp(),
-
     Msg = <<<<"35=0">>/binary,?SOHB/binary,<<"34=">>/binary,Seq/binary,?SOHB/binary,<<"49=">>/binary,Sender/binary,?SOHB/binary,<<"52=">>/binary,Time/binary,?SOHB/binary,<<"56=">>/binary,Target/binary,?SOHB/binary,<<"112=">>/binary,ReqId/binary,?SOHB/binary>>,
     L = bodylength(Msg),
     Msg0 = <<Start/binary,<<"9=">>/binary,L/binary,?SOHB/binary,Msg/binary>>,
