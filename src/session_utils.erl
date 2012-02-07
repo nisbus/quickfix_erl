@@ -20,8 +20,7 @@
 %%% API
 %%%===================================================================
 
-compose_session_id(#session_settings{begin_string = B, sender_comp_id = SC, sender_sub_id = SS, sender_location_id = SL, target_comp_id = TC, target_sub_id = TS, target_location_id = TL, session_qualifier = SQ} = _SessionSettings) ->
-    
+compose_session_id(#session_settings{begin_string = B, sender_comp_id = SC, sender_sub_id = SS, sender_location_id = SL, target_comp_id = TC, target_sub_id = TS, target_location_id = TL, session_qualifier = SQ} = _SessionSettings) ->    
     ID = to_list(B)++":"++to_list(SC),
     ID0 = append_defined(ID, [to_list(SS),to_list(SL)]) ++ "->"++to_list(TC),
     ID1 = append_defined(ID0, [to_list(TS),to_list(TL)]),

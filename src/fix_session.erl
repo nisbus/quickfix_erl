@@ -22,7 +22,7 @@
 -export([disconnected/2, connected/2, 
 	 logged_on/2, logged_off/2]).
 
--export([send/2]).
+-export([send/2,test_send/0]).
 
 -compile([{parse_transform, lager_transform}]).
 
@@ -96,8 +96,10 @@ disconnected(connect, #session_state{socket = Socket, session = Session} = State
     IP = Session#session_settings.socket_connect_host,
     Port = Session#session_settings.socket_connect_port,
     lager:error("IP ~p and port ~p~n",[IP,Port]),
-    case gen_tcp:connect(IP,Port,[binary, {packet, 0}, {active, false}, {reuseaddr, true}, {send_timeout, 5000}],10000) of
+    case gen_tcp:connect(IP,Port,[binary, {packet, 0}, {active, true}, {reuseaddr, true}, {send_timeout, 5000}],10000) of
 	{ok,S} ->
+%	    gen_tcp:controlling_process(S,self()),
+	    gen_tcp:listen(Port,[binary,{active,true}]),
 	    ?MODULE:connected(connected, State#session_state{socket = S});
 	{error, E} ->
 	    lager:error("Error connecting ~p, doing failover~n",[E]),
@@ -115,6 +117,7 @@ disconnected(failover, #session_state{session=Session} =  State) ->
     end,
     case gen_tcp:connect(IP,Port,[{packet,2}]) of
 	{ok,S} ->
+	    gen_tcp:listen(Port,[binary,{active,true}]),
 	    ?MODULE:connected(connected, State#session_state{socket = S});
 	{error, E} ->
 	    lager:error("Error connecting ~p, doing disaster~n",[E]),
@@ -132,6 +135,7 @@ disconnected(disaster, #session_state{session=Session} =  State) ->
     end,
     case gen_tcp:connect(IP,Port,[{packet,2}]) of 
 	{ok,S} -> 
+	    gen_tcp:listen(Port,[binary,{active,true}]),
 	    ?MODULE:connected(connected, State#session_state{socket = S});
 	{error, E} ->
 	    lager:error("Error connecting ~p, back to main~n",[E]),
@@ -156,10 +160,11 @@ connected({error, _Reason}, State) ->
 connected(_, #session_state{session = Session, socket = Socket} = State) ->
     lager:debug("connected~n"),
     Seq = get_sequence_number(Session#session_settings.session_id),
-
+    
     %%Send logon
+
     Logon = message_utils:create_logon(<<"1">>,Session),
-    message_store:save_msg(Session#session_settings.session_id,Logon),
+    message_store:save_msg(Session#session_settings.session_id,out,1,Logon),
     try gen_tcp:send(Socket, Logon) of
 	{error, Reason} ->
 	    lager:error("Error logging in ~p~n",[Reason]);
@@ -179,23 +184,30 @@ connected(_, #session_state{session = Session, socket = Socket} = State) ->
 %%##########################################################################
 
 logged_on({send,Msg}, #session_state{socket = Socket, session = Session} = State) ->
+    lager:debug("Send request ~p~n",[Msg]),
     I = message_utils:proplist_to_msg(Msg,Session),
     FIX = message_utils:create_msg(I,Session),
-    message_store:save_msg(Session#session_settings.session_id,FIX),
-    gen_tcp:send(Socket,FIX),
-    ?MODULE:logged_on(undefined, State);
+    
+    Seq = proplists:get_value(msgseqnum,Msg),
+    message_store:save_msg(Session#session_settings.session_id,in,Seq,FIX),
+    lager:debug("Sending ~s~n",[FIX]),
+    Sent = gen_tcp:send(Socket,FIX),
+    lager:debug("Send result ~p~n",[Sent]),
+    {next_state, logged_on, State};
 
-logged_on(_, #session_state{socket = Socket, messages = Messages, session = Session} = State) ->
-    case gen_tcp:recv(Socket, 0) of
-	{ok,D} ->
-	    message_store:save_msg(Session#session_settings.session_id,D),
-	    MessageDef = session_utils:get_msg_type(D,Messages),
-	    Msg = session_utils:parse_fix_msg(D,MessageDef),
-	    handle_message(MessageDef,Msg,State),
-	    ?MODULE:logged_on(undefined,State);	    
-	_Other ->
-	    ?MODULE:logged_off(undefined,State)
-    end,
+logged_on(_A, #session_state{socket = Socket, messages = Messages, session = Session} = State) ->
+    lager:debug("logged_on ~p~n",[_A]),
+    %% case gen_tcp:recv(Socket, 0) of
+    %% 	{ok,D} ->
+    %% 	    lager:debug("~p~n",[D]),
+    %% 	    message_store:save_msg(Session#session_settings.session_id,D),
+    %% 	    MessageDef = session_utils:get_msg_type(D,Messages),
+    %% 	    Msg = session_utils:parse_fix_msg(D,MessageDef),
+    %% 	    handle_message(MessageDef,Msg,State),
+    %% 	    ?MODULE:logged_on(undefined,State);	    
+    %% 	_Other ->
+    %% 	    ?MODULE:logged_off(undefined,State)
+    %% end,
     {next_state, logged_on, State}.
 
 %%We are logged off so we connect again
@@ -204,6 +216,7 @@ logged_off(_, State) ->
 
 
 handle_event({send,Msg}, StateName, State)->
+    lager:debug("This should be sent~n"),
     ?MODULE:StateName({send, Msg},State);
 
 handle_event(_Event, StateName, State) ->
@@ -218,9 +231,20 @@ handle_info(connect, StateName, State) ->
     lager:debug("handle info, connect~n"),
     ?MODULE:StateName(connect, State);
 
+handle_info({tcp,Port,Data},StateName,#session_state{messages = Messages, session = Session} = State) ->
+    lager:debug("Receving data ~s~n",[Data]),
+    MessageDef = session_utils:get_msg_type(Data,Messages),
+    Msg = session_utils:parse_fix_msg(Data,MessageDef),
+    Seq = proplists:get_value(msgseqnum,Msg),
+    lager:debug("Incoming Seqno = ~p~n",[Seq]),
+    message_store:save_msg(Session#session_settings.session_id,in,Seq,Data),
+    handle_message(MessageDef,Msg,State),
+    {next_state, StateName, State};
+
+
 handle_info(Info, StateName, StateData) ->
     lager:debug("handle info, ~p, ~p~n",[Info, StateName]),
-    {noreply, StateName, StateData}.
+    {next_state, StateName, StateData}.
 
 terminate(_Reason, _StateName, #session_state{socket = Socket}) ->
     (catch gen_tcp:close(Socket)),
@@ -237,57 +261,66 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%=======================================================================================
 %%LOGON
 handle_message(#message{is_admin = true, tag = <<"A">>}, ParsedMsg, State) ->
-    ?MODULE:logged_on(undefined,State);
+    {next_state,logged_on,State};
 
 %%HEARTBEAT
 handle_message(#message{is_admin = true, tag = <<"0">>}, ParsedMsg, #session_state{session = Session, socket = Socket} = State) ->
     Seq = get_sequence_number(Session#session_settings.session_id),
     Heartbeat = message_utils:create_heartbeat(Seq,Session),
-    message_store:save_msg(Session#session_settings.session_id,Heartbeat),
+    message_store:save_msg(Session#session_settings.session_id,out,Seq,Heartbeat),
     gen_tcp:send(Socket,Heartbeat),
     NextSeq = increment_sequence(Seq),
     set_sequence_number(NextSeq),
-    ?MODULE:logged_on(undefined,State);
+    {next_state,logged_on,State};
 
  %%TEST REQUEST
 handle_message(#message{is_admin = true, tag = <<"1">>, fields = Fields}, ParsedMsg, #session_state{session = Session, socket = Socket} = State) ->
     ReqId = proplists:get_value(testreqid,ParsedMsg),
     Seq = get_sequence_number(Session#session_settings.session_id),
     Heartbeat = message_utils:create_heartbeat(Seq,Session,ReqId),
-    message_store:save_msg(Session#session_settings.session_id,Heartbeat),
+    message_store:save_msg(Session#session_settings.session_id,out,Seq,Heartbeat),
     gen_tcp:send(Socket,Heartbeat),
     NextSeq = increment_sequence(Seq),
     set_sequence_number(NextSeq),
-    ?MODULE:logged_on(undefined,State);
+    {next_state,logged_on,State};
 
 %%RESEND REQUEST
-handle_message(#message{is_admin = true, tag = <<"2">>}, ParsedMsg, State) ->
-    ?MODULE:logged_on(undefined,State);
+handle_message(#message{is_admin = true, tag = <<"2">>}, ParsedMsg, #session_state{session = Session} = State) ->
+    Begin = proplists:get_value(beginseqno,ParsedMsg),
+    End = proplists:get_value(endseqno, ParsedMsg),
+    lager:debug("Received resend request for ~p-~p~n",[Begin,End]),
+    Id = Session#session_settings.session_id,
+    Msgs = message_store:get_messages(Id,in,Begin,End),
+    lists:foreach(fun(M) ->
+			  fix_session:send(Id,M)
+		  end,Msgs),
+    {next_state,logged_on,State};
 
 %%REJECT
-handle_message(#message{is_admin = true, tag = <<"3">>, fields = Fields}, ParsedMsg, _State) ->
+handle_message(#message{is_admin = true, tag = <<"3">>, fields = Fields}, ParsedMsg, State) ->
     Text = proplists:get_value(text,Fields),
-    lager:error("Rejected ~p~n",[Text]);
+    lager:error("Rejected ~p~n",[Text]),
+    {next_state,logged_on,State};
 
 %%SEQUENCE RESET
 handle_message(#message{is_admin = true, tag = <<"4">>}, ParsedMsg, State) ->
-    ?MODULE:logged_on(undefined,State);
+    {next_state,logged_on,State};
 
 %%LOGOUT
-handle_message(#message{is_admin = true, tag = <<"5">>,fields = Fields}, ParsedMsg, _State) ->
+handle_message(#message{is_admin = true, tag = <<"5">>,fields = Fields}, ParsedMsg, State) ->
     Text = proplists:get_value(text,Fields),
-    lager:error("Logged off ~p~n",[Text]);
+    lager:error("Logged off ~p~n",[Text]),
+    {next_state,logged_on,State};
 
 %%%=======================================================================================
 %%%             APPLICATION MESSAGES
 %%%=======================================================================================
 handle_message(_MsgDef, _ParsedMsg, State) ->
-    ?MODULE:logged_on(undefined,State).
+    {next_state,logged_on,State}.
 
 %%%=======================================================================================
 %%%             Sequence number handling
 %%%=======================================================================================
-
 get_sequence_number(SessionID) ->
     case erlang:get(seq) of
 	undefined -> 
@@ -311,7 +344,8 @@ get_seq_from_file(SessionID) ->
 	{ok, S} ->
 	    S;
 	{error, Reason} ->	    
-	    lager:error("Error reading seq file ~p~n",[Reason]),
+	    Seq = message_store:get_last_out_seq(SessionID),
+	    lager:error("Error reading seq file ~p, ~p~n",[Reason,Seq]),
 	    list_to_binary(integer_to_list(1))
     end.
 
@@ -319,3 +353,19 @@ increment_sequence(Seq) when is_binary(Seq) ->
     list_to_integer(binary_to_list(Seq))+1;
 increment_sequence(Seq) when is_integer(Seq) ->
     Seq+1.
+
+
+%%%=======================================================================================
+%%%             Testing
+%%%=======================================================================================
+test_send() ->
+    M = [{<<"35">>, <<"D">>},
+     {<<"11">>, <<"CLORDID">>},
+     {<<"55">>,<<"SYMBOL">>},
+     {<<"21">>,<<"3">>},
+     {<<"54">>,<<"1">>},
+     {<<"40">>,<<"1">>}
+	],
+    io:format("Send message ~p~n",[M]),
+    fix_session:send('FIX.4.2:SENDER->TARGET:',M).
+
